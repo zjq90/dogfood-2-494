@@ -247,4 +247,37 @@ public  class TradeDoArgs {
         }
 
     }
+    public static Map<String,String> return_success(Map<String,String> param,String client_no,String client_public_key,String lgyf_private_key,String msg,String action_code){
+        Map<String,String> return_map=new HashMap<String,String> ();
+        String uuid="";
+        String suuid="";
+        if(!param.containsKey("uuid")){
+            uuid= UUID.randomUUID().toString();
+        }else{
+            uuid=param.get("uuid");
+            suuid=param.get("suuid")==null?"":param.get("suuid");
+            param.remove("uuid");
+            param.remove("suuid");
+        }
+        return_map.put("client_no",client_no);
+        return_map.put("action_code",action_code);
+        return_map.put("code","000");
+        return_map.put("uuid",uuid);
+        return_map.put("msg",msg);
+        try {
+            String sign = RSAUtil.signWithRSA(param, lgyf_private_key);
+            param.put("sign",sign);
+            String data_str= JSON.toJSONString(param);
+            String data= RSAUtil.publicEncrypt(data_str,RSAUtil.getPublicKey(client_public_key));
+            return_map.put("data",data);
+            logger.info(suuid+"成功返回数据:"+ JSON.toJSONString(return_map));
+            return return_map;
+        }catch (Exception e){
+            Map<String,String> map=new HashMap<>();
+            map.put("client_no",client_no);
+            map.put("uuid",uuid);
+            return return_error(map,"002","系统加密失败");
+        }
+
+    }
 }

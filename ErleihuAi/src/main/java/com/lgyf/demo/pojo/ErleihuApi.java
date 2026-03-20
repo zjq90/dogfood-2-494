@@ -32,8 +32,8 @@ public class ErleihuApi {
         return suuid;
     }
 
-    public void setSuuid(String suuid) {
-        this.suuid = suuid;
+    public static void setSuuid(String suuid) {
+        ErleihuApi.suuid = suuid;
     }
 
     /**
