@@ -84,6 +84,8 @@ public class TradDoController extends PublicController {
             if(action_code.equals("00")){
                 erLeihuDataApi.setAgentArgs(agentArgs);
                 return erLeihuDataApi.get_client_reg(prame);
+            } else if(action_code.equals("01")){
+                return erLeihuDataApi.uploadIdCard(prame);
             }
 
            return TradeDoArgs.return_error(args,"100000","接口类型码错误");

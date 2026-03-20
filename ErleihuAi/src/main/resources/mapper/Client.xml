@@ -17,6 +17,10 @@
           values(#{client_no},#{name},#{phone},#{client_public_key},#{socket_ip},#{client_name},#{status},0,sysdate())
     </insert>
 
+    <insert id="upload_cert" parameterType="com.lgyf.demo.bean.UploadCert">
+          insert into upload_cert(client_no,cert_no,name,upload_status,cert_order_no,add_time,msg)
+          values(#{client_no},#{cert_no},#{name},#{upload_status},#{cert_order_no},sysdate(),#{msg})
+    </insert>
 
 </mapper>
 

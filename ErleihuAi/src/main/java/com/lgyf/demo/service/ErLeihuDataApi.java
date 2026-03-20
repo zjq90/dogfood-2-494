@@ -8,15 +8,14 @@ import com.lgyf.demo.pojo.ErleihuApi;
 import com.lgyf.demo.util.*;
 import com.pab.is.obp.easysdk.client.model.*;
 import com.pingan.api.util.FileUploadResponse;
-import lombok.val;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.RequestBody;
 
-
 import javax.annotation.Resource;
+import java.io.File;
 import java.util.*;
 
 @SuppressWarnings("all")
@@ -108,6 +107,184 @@ public class ErLeihuDataApi {
     }
 
 
+    /**
+     * 身份证上传接口
+     * @param args
+     * @return
+     */
+    public Map<String,String> uploadIdCard(@RequestBody Map<String, String> args) {
+        StringBuffer log = new StringBuffer();
+        log.append("身份证上传参数:" + JSON.toJSONString(args) + "\n");
+        Map<String, String> mapMeta = new HashMap<String, String>();
+        mapMeta.put("uuid", args.get("uuid"));
+        mapMeta.put("suuid", suuid);
+        String client_no = args.get("client_no");
+        String client_public_key = client.getClient_public_key();
+        String cert_no = args.get("cert_no");
+        String name = args.get("name");
+        String cert_pic_front = args.get("cert_pic_front");
+        String cert_pic_reverse = args.get("cert_pic_reverse");
+        String msg = "成功";
 
+        try {
+            // 调用图片服务器上传方法
+            Map<String, String> uploadResult = uploadImageToServer(cert_pic_front, cert_pic_reverse, cert_no);
+            String uploadCode = uploadResult.get("code");
+            String uploadMsg = uploadResult.get("msg");
+            log.append("图片服务器上传结果:code=" + uploadCode + ",msg=" + uploadMsg + "\n");
+
+            if ("err".equals(uploadCode)) {
+                log.append("图片上传失败:" + uploadMsg + "\n");
+                return TradeDoArgs.return_error(args, "010", uploadMsg);
+            }
+
+            // 获取图片保存路径
+            String cert_pic_front_path = uploadResult.get("cert_pic_front_path");
+            String cert_pic_reverse_path = uploadResult.get("cert_pic_reverse_path");
+
+            // 封装二类户专用通道方法参数
+            Map<String, String> obpArgs = new HashMap<>();
+            obpArgs.put("cert_pic_front_path", cert_pic_front_path);
+            obpArgs.put("cert_pic_reverse_path", cert_pic_reverse_path);
+            obpArgs.put("cert_no", cert_no);
+            obpArgs.put("name", name);
+
+            // 设置suuid到erleihuApi
+            erleihuApi.setSuuid(suuid);
+
+            // 调用二类户专用通道方法
+            Map<String, String> obpResult = ErleihuApi.obpApiIbankAcctWefileId(obpArgs);
+            String obpCode = obpResult.get("code");
+            String obpMsg = obpResult.get("msg");
+            log.append("二类户专用通道调用结果:code=" + obpCode + ",msg=" + obpMsg + "\n");
+
+            if ("fail".equals(obpCode)) {
+                log.append("二类户专用通道调用失败:" + obpMsg + "\n");
+                return TradeDoArgs.return_error(args, "011", obpMsg);
+            }
+
+            // 获取身份证申请号
+            String cert_order_no = obpResult.get("cert_order_no");
+
+            // 封装返回参数
+            mapMeta.put("name", name);
+            mapMeta.put("cert_no", cert_no);
+            mapMeta.put("cert_order_no", cert_order_no);
+
+            // 保存上传记录到数据库
+            UploadCert uploadCert = new UploadCert();
+            uploadCert.setClient_no(client_no);
+            uploadCert.setCert_no(cert_no);
+            uploadCert.setName(name);
+            uploadCert.setUpload_status("1"); // 1为成功
+            uploadCert.setCert_order_no(cert_order_no);
+            uploadCert.setMsg(msg);
+
+            try {
+                int insertResult = clientDao.insert("upload_cert", uploadCert);
+                if (insertResult > 0) {
+                    log.append("上传记录保存成功\n");
+                } else {
+                    log.append("上传记录保存失败\n");
+                }
+            } catch (Exception e) {
+                log.append("保存上传记录异常:" + e.getMessage() + "\n");
+                error.error(suuid + "保存上传记录异常", e);
+            }
+
+            log.append("身份证上传成功,cert_order_no=" + cert_order_no + "\n");
+            return TradeDoArgs.return_success(mapMeta, client_no, client_public_key, api_private_key, msg);
+
+        } catch (Exception e) {
+            log.append(suuid + "身份证上传异常\n");
+            error.error(suuid + "身份证上传uploadIdCard", e);
+            return TradeDoArgs.return_error(args, "002", "身份证上传异常");
+        } finally {
+            logger.info(log.toString());
+        }
+    }
+
+    /**
+     * 上传图片到服务器
+     * @param cert_pic_front 身份证正面图片hex字符串
+     * @param cert_pic_reverse 身份证反面图片hex字符串
+     * @param cert_no 身份证号
+     * @return 上传结果，包含code、msg、图片路径
+     */
+    public Map<String, String> uploadImageToServer(String cert_pic_front, String cert_pic_reverse, String cert_no) {
+        Map<String, String> result = new HashMap<>();
+        StringBuffer log = new StringBuffer();
+        log.append("上传图片到服务器开始,cert_no=" + cert_no + "\n");
+
+        try {
+            // 参数非空验证
+            if (cert_pic_front == null || cert_pic_front.trim().isEmpty()) {
+                result.put("code", "err");
+                result.put("msg", "身份证正面图片不能为空");
+                log.append("身份证正面图片为空\n");
+                return result;
+            }
+            if (cert_pic_reverse == null || cert_pic_reverse.trim().isEmpty()) {
+                result.put("code", "err");
+                result.put("msg", "身份证反面图片不能为空");
+                log.append("身份证反面图片为空\n");
+                return result;
+            }
+            if (cert_no == null || cert_no.trim().isEmpty()) {
+                result.put("code", "err");
+                result.put("msg", "身份证号不能为空");
+                log.append("身份证号为空\n");
+                return result;
+            }
+
+            // 获取图片保存路径
+            String uploadPath = idcardUrl;
+            if (!uploadPath.endsWith("/")) {
+                uploadPath += "/";
+            }
+
+            // 创建目录
+            File uploadDir = new File(uploadPath);
+            if (!uploadDir.exists()) {
+                uploadDir.mkdirs();
+            }
+
+            // 以cert_no命名图片
+            String frontFileName = cert_no + "_front.jpg";
+            String reverseFileName = cert_no + "_reverse.jpg";
+            String frontFilePath = uploadPath + frontFileName;
+            String reverseFilePath = uploadPath + reverseFileName;
+
+            // 将hex字符串转换为byte数组并保存为图片
+            byte[] frontBytes = PicUtils.hex2byte(cert_pic_front);
+            byte[] reverseBytes = PicUtils.hex2byte(cert_pic_reverse);
+
+            boolean frontSaved = PicUtils.byte2image(frontBytes, frontFilePath);
+            boolean reverseSaved = PicUtils.byte2image(reverseBytes, reverseFilePath);
+
+            if (!frontSaved || !reverseSaved) {
+                result.put("code", "err");
+                result.put("msg", "图片保存失败");
+                log.append("图片保存失败,frontSaved=" + frontSaved + ",reverseSaved=" + reverseSaved + "\n");
+                return result;
+            }
+
+            log.append("图片保存成功,frontPath=" + frontFilePath + ",reversePath=" + reverseFilePath + "\n");
+            result.put("code", "success");
+            result.put("msg", "图片上传成功");
+            result.put("cert_pic_front_path", frontFilePath);
+            result.put("cert_pic_reverse_path", reverseFilePath);
+            return result;
+
+        } catch (Exception e) {
+            log.append("上传图片异常:" + e.getMessage() + "\n");
+            error.error(suuid + "上传图片到服务器异常", e);
+            result.put("code", "err");
+            result.put("msg", "图片上传异常:" + e.getMessage());
+            return result;
+        } finally {
+            logger.info(log.toString());
+        }
+    }
 
 }
